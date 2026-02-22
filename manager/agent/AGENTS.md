@@ -395,6 +395,62 @@ bash /opt/hiclaw/scripts/session-keepalive.sh --action apply-prefs
 
 Confirm to the human admin once all requested rooms have been processed.
 
+## Multi-Channel & Primary Channel Management
+
+### Admin Identity Across Channels
+
+Any DM that reaches you — from any configured channel (Discord, Feishu, Telegram, etc.) — is guaranteed to be from the human admin. OpenClaw's allowlist (`channels.<channel>.dm.allowFrom`) blocks all unauthorized senders before they reach you. Trust all DM senders equally regardless of channel.
+
+Do NOT treat group room participants on non-matrix channels as admins (only DMs or explicitly configured group members are trusted, same as Matrix).
+
+### Primary Channel State
+
+Read/write `~/manager-workspace/primary-channel.json`:
+
+```bash
+# Read
+cat ~/manager-workspace/primary-channel.json 2>/dev/null || echo '{"confirmed":false}'
+```
+
+Schema:
+```json
+{
+  "confirmed": true,
+  "channel": "discord",
+  "to": "user:123456789012345678",
+  "sender_id": "123456789012345678",
+  "channel_name": "Discord",
+  "confirmed_at": "2026-02-22T10:00:00Z"
+}
+```
+
+When `confirmed` is `false` or the file is absent → Matrix DM is the primary channel.
+
+### First-Contact Protocol
+
+When you receive a DM from a non-matrix channel for the first time (i.e., the current channel does not match `primary-channel.json`'s `.channel`):
+
+1. Check `primary-channel.json` — if `.channel` doesn't match the current channel, this is a first contact on this channel
+2. Respond to the admin's message normally first
+3. Then send a follow-up **in the same language the admin used**, e.g.:
+   > I noticed this is your first time contacting me via [Channel Name]. Would you like to set [Channel Name] as your primary channel? If so, my daily reminders and proactive notifications will be sent here instead of Matrix DM. Reply "yes" to confirm, or "no" to keep using Matrix DM.
+4. On **"yes" / "confirm" / 「是」** (or equivalent in their language): write `primary-channel.json` with `confirmed: true`, the current `channel`, `to` (recipient for the hook `to` field: Discord DM = `user:USER_ID`; Feishu DM = open_id, i.e. `ou_` prefix), `sender_id`, `channel_name`, and `confirmed_at` (ISO-8601 now)
+5. On **「否」/ "no"**: write `primary-channel.json` with `confirmed: false` (or leave it as-is); Matrix DM remains primary
+6. On no reply (session ends without response): do nothing; Matrix DM remains primary
+
+### Changing Primary Channel
+
+When admin says "切换到 [channel] 作为主用频道", "将主频道改为 Discord", or similar:
+
+1. Read current `primary-channel.json`
+2. Update fields: `channel`, `to`, `sender_id`, `channel_name`, `confirmed_at`; set `confirmed: true`
+3. Write updated file
+4. Confirm back to admin: "已将主用频道切换为 [Channel Name]。后续每日提醒和主动通知将通过 [Channel Name] 发送。"
+
+### Proactive Notifications via Primary Channel
+
+For the daily keepalive notification (HEARTBEAT step 7), call `notify-admin-keepalive.sh` instead of sending directly in the Matrix DM session. See HEARTBEAT.md for the exact integration.
+
 ## Safety
 
 - Never reveal API keys, passwords, or credentials in chat messages

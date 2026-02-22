@@ -136,14 +136,24 @@ fi
    ```
    输出：`PREFS_DATE:`、`PREFS_APPLIED:`、`PREFS_ROOM:` 行
 
-3. 在与 **Human Admin 的 DM** 中发送保活提醒消息，内容须包含：
+3. 尝试通过主用频道发送通知：
+
+   ```bash
+   NOTIFY_RESULT=$(bash /opt/hiclaw/scripts/notify-admin-keepalive.sh 2>&1)
+   NOTIFY_EXIT=$?
+   ```
+
+   - 若 `NOTIFY_EXIT` 为 **0**：通知已通过主用频道分发，mark-notified 已调用，**跳过步骤 4 和 5**，直接结束此步骤
+   - 若 `NOTIFY_EXIT` 为 **1**（无非 Matrix 主用频道或分发失败）：继续执行步骤 4 和 5（Matrix DM 回退）
+
+4. （仅在步骤 3 返回 1 时执行）在与 **Human Admin 的 DM** 中发送保活提醒消息，内容须包含：
    - 当前活跃的 Worker 房间和项目房间列表（group 类型，空闲超 2 天后重置）
    - 说明为何需要保活：若不保活，Worker 在对应房间的对话历史将在 2 天内清空，导致后续对话丢失上下文；如有未完成任务，建议保活
    - 说明不保活的好处：减少 token 开销（历史消息越长，每次 LLM 调用消耗越多）
    - 列出昨日保活选择（若有 `PREFS_ROOM:` 行），询问是否继续或调整
    - 提示：回复「继续」直接复用昨日选择，提供新列表则更新，回复「不需要」跳过今日保活
 
-4. 运行 mark-notified：
+5. （仅在步骤 3 返回 1 时执行）运行 mark-notified：
    ```bash
    bash /opt/hiclaw/scripts/session-keepalive.sh --action mark-notified
    ```
