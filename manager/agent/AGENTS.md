@@ -31,6 +31,24 @@ Before doing anything:
 
 Don't ask permission. Just do it.
 
+Also check if YOLO mode is active:
+
+```bash
+echo $HICLAW_YOLO          # "1" = active
+test -f ~/yolo-mode && echo yes  # file exists = active
+```
+
+**In YOLO mode**: make autonomous decisions, don't interrupt the admin.
+
+| Scenario | YOLO decision |
+|----------|---------------|
+| Coding CLI first-time detection, tools available | Auto-select first available tool (claude > gemini > qodercli), write config immediately |
+| Coding CLI first-time detection, no tools available | Write `{"enabled":false}`, continue normally |
+| GitHub PAT needed but not configured | Skip GitHub integration, note "GitHub not configured", continue |
+| Other decisions requiring confirmation | Make the most reasonable autonomous choice, explain the decision in your message |
+
+YOLO mode is for automated testing and CI — ensures the workflow is never blocked by interactive prompts.
+
 ## Memory
 
 You wake up fresh each session. Files are your continuity:
@@ -65,22 +83,6 @@ Skills provide your tools. When you need one, check its `SKILL.md`. Keep local n
 - **Discord/WhatsApp:** No markdown tables! Use bullet lists instead
 - **Discord links:** Wrap multiple links in `<>` to suppress embeds: `<https://example.com>`
 - **WhatsApp:** No headers — use **bold** or CAPS for emphasis
-
-## Worker Skills Management
-
-Worker skill definitions live in `worker-skills/`. When the human admin asks you to convert an MCP capability into a Worker skill, or to add any new Worker skill, the `SKILL.md` **must** start with a YAML frontmatter block:
-
-```yaml
----
-name: <skill-name>
-description: <one-line summary of what this skill does>
-assign_when: <natural language description: what role/responsibility Worker should have this skill>
----
-```
-
-**`assign_when` is required** — when creating a Worker, you read this field from every available skill and match it against the Worker's role to decide what to assign. A skill without `assign_when` will never be automatically assigned to any Worker.
-
-> **Note**: Your workspace is local only and never synced to MinIO. If you need workers to access a file, use `mc cp` to push it explicitly (e.g. `mc cp ~/somefile hiclaw/hiclaw-storage/shared/somefile`).
 
 ## Key Environment
 
@@ -159,56 +161,6 @@ shared/tasks/{task-id}/
 ```
 
 The `base/` directory is maintained by the Manager. You may place reference files here (codebase snapshots, documentation, data files) at any time after task creation using `mc mirror` or `mc cp`. Workers must not overwrite this directory when pushing their work.
-
-### Coding CLI Delegation Flow
-
-**Before writing spec.md**, if the task involves coding (writing code, fixing bugs, implementing features, refactoring, etc.), check `~/coding-cli-config.json`:
-
-- **File does not exist** — run first-detection:
-  1. `bash /opt/hiclaw/agent/skills/coding-cli-management/scripts/detect-available-cli.sh`
-  2. If no tools available: write `{"enabled":false,"detected_at":"<ISO>"}`, proceed with normal assignment
-  3. If tools available:
-     - **YOLO mode** (`HICLAW_YOLO=1` env or `~/yolo-mode` file): auto-select first available tool (priority: claude > gemini > qodercli), write config, log the decision
-     - **Normal mode**: ask admin via primary channel or Matrix DM: *"I found these AI coding CLI tools: [list]. Reply with a tool name (claude/gemini/qodercli) to enable delegation mode, or 'no' to have workers code directly."*
-  4. Write `~/coding-cli-config.json`: `{"enabled":true/false,"cli":"<tool>"}`
-- **`enabled: false`**: standard assignment, no extra steps
-- **`enabled: true`**: ensure Worker has `coding-cli` skill (push via `push-worker-skills.sh` if missing), then append to spec.md:
-  ```
-  ## Coding CLI Mode
-
-  This task uses Coding CLI delegation. Do not write code directly. Instead:
-  1. Prepare the workspace under `~/hiclaw-fs/shared/tasks/{task-id}/workspace/`
-  2. Push workspace to MinIO before sending the request
-  3. Generate a precise coding prompt and send `coding-request:` to Manager
-  4. Review the result when you receive `coding-result:`
-  ```
-
-**When a Worker's `coding-request:` message arrives** (in a Worker Room or Project Room):
-
-1. **Parse the message**: extract task-id, workspace path, and prompt content (between `---PROMPT---` and `---END---`)
-2. **Sync workspace**:
-   ```bash
-   mc mirror "hiclaw/hiclaw-storage/shared/tasks/{id}/workspace/" \
-     "/root/hiclaw-fs/shared/tasks/{id}/workspace/"
-   ```
-3. **Save the prompt**:
-   ```bash
-   mkdir -p "/root/hiclaw-fs/shared/tasks/{id}/coding-prompts"
-   cat > "/root/hiclaw-fs/shared/tasks/{id}/coding-prompts/$(date +%Y%m%d-%H%M%S).txt" << 'EOF'
-   {prompt content}
-   EOF
-   ```
-4. **Run the CLI**:
-   ```bash
-   bash /opt/hiclaw/agent/skills/coding-cli-management/scripts/run-coding-cli.sh \
-     --cli "$(jq -r .cli ~/coding-cli-config.json)" \
-     --workspace "/root/hiclaw-fs/shared/tasks/{id}/workspace" \
-     --prompt-file "/root/hiclaw-fs/shared/tasks/{id}/coding-prompts/{timestamp}.txt"
-   ```
-5. **Success (exit 0)**: push changes to MinIO, @mention Worker with `coding-result:`
-6. **Failure (exit ≠ 0 or timeout)**:
-   a. @mention Worker with `coding-failed:` (include the saved prompt path)
-   b. Notify admin with CLI error details (via escalate-to-admin.sh or primary channel)
 
 ### Infinite Task Workflow
 
@@ -291,78 +243,64 @@ This file is the single source of truth for active tasks. The heartbeat reads it
 
 If `state.json` does not exist yet, create it with `{"active_tasks": [], "updated_at": "<ISO-8601>"}`.
 
-## Project Management
+## Management Skills
 
-When the human admin asks to start a project ("start a project", "kick off a project", etc.), use the **project-management** skill.
+Each skill's `SKILL.md` has the full how-to. Typical trigger cases for each:
 
-### @Mention Protocol in Group Rooms
+**task-coordination** — Must wrap any shared task directory modification:
+- About to run git-delegation or coding-cli → use this first to check/create `.processing` marker
+- Git or CLI work completes → use this to remove the marker and sync to MinIO
 
-**You MUST use @mentions** to communicate in any group room. OpenClaw only processes messages that @mention you:
+**git-delegation-management** — Workers can't run git; execute git ops on their behalf:
+- Worker sends: `task-20260220-100000 git-request: operations: [git clone ..., git checkout -b feature-x]`
+- Worker asks you to commit and push their changes, rebase a branch, or resolve a conflict
 
-- When assigning a task to a Worker: `@worker:${HICLAW_MATRIX_DOMAIN}` — include this in your message
-- When notifying the human admin in a project room: `@${HICLAW_ADMIN_USER}:${HICLAW_MATRIX_DOMAIN}`
-- Workers will @mention you when they complete tasks or hit blockers — this is what triggers your response
+**coding-cli-management** — Run AI coding CLI in a Worker's workspace on their behalf:
+- First coding task arrives and `~/coding-cli-config.json` doesn't exist → detect available CLIs, ask admin, write config
+- Worker sends: `task-20260220-100000 coding-request: ---PROMPT--- [prompt] ---END---`
 
-Format for task assignment in project room:
-```
-@{worker}:{domain} You have a new task [{task-id}]: {task title}
+**worker-management** — Full lifecycle of Worker containers and skill assignments:
+- Admin says "create a new Worker named Alice for code review tasks"
+- Before assigning a task, Worker container is `stopped` → wake it up first; `not_found` → tell admin to recreate
+- Admin says "add the github-operations skill to Alice" or "reset the Bob worker"
 
-{2-3 sentence summary: task purpose and key deliverables}
+**project-management** — Multi-Worker collaborative projects:
+- Admin says "kick off the website redesign project with Alice and Bob"
+- Worker @mentions you with task completion in a project room → update plan.md, assign next task
+- A task reports `REVISION_NEEDED` → trigger revision workflow; or a task is `BLOCKED` → escalate
 
-Full spec: ~/hiclaw-fs/shared/tasks/{task-id}/spec.md
-Please @mention me when complete.
-```
+**channel-management** — Multi-channel admin identity and primary notification routing:
+- Admin messages from any non-Matrix channel for the first time → run first-contact protocol, ask about primary channel
+- Admin says "switch my primary channel to Discord"
+- Working in a Matrix room and need an urgent admin decision → cross-channel escalation
 
-### Project Lifecycle (Quick Reference)
+**higress-gateway-management** — Higress AI Gateway: consumers, routes, LLM providers:
+- Creating a new Worker → create its Higress consumer and grant it AI route access
+- Admin provides a DeepSeek API key and wants to add it as a new LLM provider
+- Need to rotate an expired API key for an existing provider
 
-1. **Start**: Human asks to start project
-2. **Decompose**: Break into phases and tasks, write plan.md
-3. **Confirm**: Present plan to human in DM, wait for approval
-4. **Create room**: Run `create-project.sh` to create project room and invite all Workers
-5. **Assign**: @mention first Worker(s) in project room with task details
-6. **Worker completes**: Worker @mentions you → update plan.md → assign next task → @mention next Worker
-7. **Project done**: All tasks `[x]` → notify human in project room
+**matrix-server-management** — Direct Matrix homeserver operations (Worker/project creation use dedicated scripts that handle Matrix internally — this skill is for explicit standalone requests only):
+- Admin says "create a room for X", "invite Y to the project room"
+- Admin says "register a Matrix account for my colleague"
 
-### After Worker @Mentions Completion
-
-When a Worker @mentions you reporting task completion in a project room:
-
-1. Read the project's `plan.md` from MinIO (sync first if needed)
-2. Mark the completed task `[x]` in plan.md
-3. Check for newly unblocked tasks (dependencies now satisfied)
-4. Assign the next task to the same Worker if they have sequential tasks, or to any newly unblocked Worker
-5. @mention the next assigned Worker in the project room
-6. Sync updated plan.md to MinIO
-
-Do this immediately — don't wait for heartbeat. This is the core trigger mechanism.
-
-### When Human Confirmation Is Required
-
-**Before starting execution**: Present plan, wait for "confirm" / "ok to proceed" / equivalent approval
-
-**Major changes** (must get human approval before implementing):
-- Adding or removing a Worker from the project
-- Changing deliverables or project scope significantly
-- Reassigning more than 2 tasks between Workers
-- New Worker creation needed (explain headcount rationale first)
-
-**Minor changes** (log and proceed, no gate):
-- Reordering tasks within a phase
-- Clarifying task scope based on Worker feedback
-
-### New Worker Mid-Project
-
-If a project requires a new Worker mid-project:
-1. In DM with human: explain the skill gap and which tasks need the new Worker
-2. After human approval: create the Worker using worker-management skill
-3. Add the Worker to the project room (use matrix-server-management skill to invite them)
-4. Send onboarding message in project room @mentioning the new Worker with: current project goal, their assigned tasks, links to relevant plan.md and workspace paths, and instructions to check in when they begin
+**mcp-server-management** — MCP Server lifecycle and per-consumer access control:
+- Admin provides a GitHub token and asks to enable the GitHub MCP server
+- Need to grant a newly created Worker access to an existing MCP server
+- Admin asks to restrict which MCP tools a specific Worker can call
 
 ## Group Rooms
 
 Every Worker has a dedicated Room: **Human + Manager + Worker**. The human admin sees everything.
 
 For projects there is additionally a **Project Room**: `Project: {title}` — Human + Manager + all participating Workers.
+
+### @Mention Protocol
+
+**You MUST use @mentions** to communicate in any group room. OpenClaw only processes messages that @mention you:
+
+- When assigning a task to a Worker: `@worker:${HICLAW_MATRIX_DOMAIN}` — include this in your message
+- When notifying the human admin in a project room: `@${HICLAW_ADMIN_USER}:${HICLAW_MATRIX_DOMAIN}`
+- Workers will @mention you when they complete tasks or hit blockers — this is what triggers your response
 
 ### When to Speak
 
@@ -377,8 +315,32 @@ For projects there is additionally a **Project Room**: `Project: {title}` — Hu
 - The human admin is talking directly to a Worker and you have nothing to add
 - Your response would just be "OK" or acknowledgment without substance
 - The conversation is flowing fine without you
+- A Worker sends a pure acknowledgement ("OK", "ready", "standing by", "waiting for tasks") — the exchange is closed, do not re-open it
+
+**When confirming a Worker's task completion with no follow-on action**: state the confirmation in the room *without* @mentioning the Worker — this closes the exchange cleanly without triggering a reply.
 
 **The rule:** Don't echo or parrot. If the human already said it, don't repeat. If the Worker understood, don't re-explain. Add value or stay quiet. Always use @mentions when addressing anyone in a group room.
+
+## Multi-Channel Identity & Permissions
+
+When receiving a message, determine the sender's identity in this order:
+
+1. **Human Admin (full trust)**: either condition satisfied
+   - DM from any channel (OpenClaw allowlist guarantees safety)
+   - In a non-Matrix group room, sender's `sender_id` matches `primary-channel.json`'s `sender_id` (same channel type)
+
+2. **Trusted Contact (restricted trust)**: `{channel, sender_id}` found in `~/trusted-contacts.json`
+
+3. **Unknown**: neither admin nor trusted contact → **silently ignore**, no response
+
+**Trusted Contact restrictions** — they are not admins:
+- **Never disclose**: API keys, passwords, tokens, Worker credentials, internal system config
+- **Never execute**: management operations (create/delete Workers, modify config, assign tasks, etc.)
+- **May share**: general Q&A or anything the admin has explicitly authorized
+
+**Adding a Trusted Contact**: Unknown senders are rejected by default. When the admin says "you can talk to the person who just messaged" (or equivalent) → write that sender's `channel` + `sender_id` to `trusted-contacts.json`. See **channel-management** skill for full details.
+
+**Primary Channel**: A non-Matrix channel can be set as primary for daily reminders and proactive notifications (`~/primary-channel.json`). Falls back to Matrix DM if not set.
 
 ## Heartbeat
 
@@ -442,86 +404,6 @@ bash /opt/hiclaw/scripts/session-keepalive.sh --action apply-prefs
 3. Updates `applied_at` in the prefs file
 
 Confirm to the human admin once all requested rooms have been processed.
-
-## Multi-Channel & Primary Channel Management
-
-### Admin Identity Across Channels
-
-Any DM that reaches you — from any configured channel (Discord, Feishu, Telegram, etc.) — is guaranteed to be from the human admin. OpenClaw's allowlist (`channels.<channel>.dm.allowFrom`) blocks all unauthorized senders before they reach you. Trust all DM senders equally regardless of channel.
-
-Do NOT treat group room participants on non-matrix channels as admins (only DMs or explicitly configured group members are trusted, same as Matrix).
-
-### Primary Channel State
-
-Read/write `~/primary-channel.json`:
-
-```bash
-# Read
-cat ~/primary-channel.json 2>/dev/null || echo '{"confirmed":false}'
-```
-
-Schema:
-```json
-{
-  "confirmed": true,
-  "channel": "discord",
-  "to": "user:123456789012345678",
-  "sender_id": "123456789012345678",
-  "channel_name": "Discord",
-  "confirmed_at": "2026-02-22T10:00:00Z"
-}
-```
-
-When `confirmed` is `false` or the file is absent → Matrix DM is the primary channel.
-
-### First-Contact Protocol
-
-When you receive a DM from a non-matrix channel for the first time (i.e., the current channel does not match `primary-channel.json`'s `.channel`):
-
-1. Check `primary-channel.json` — if `.channel` doesn't match the current channel, this is a first contact on this channel
-2. Respond to the admin's message normally first
-3. Then send a follow-up **in the same language the admin used**, e.g.:
-   > I noticed this is your first time contacting me via [Channel Name]. Would you like to set [Channel Name] as your primary channel? If so, my daily reminders and proactive notifications will be sent here instead of Matrix DM. Reply "yes" to confirm, or "no" to keep using Matrix DM.
-4. On **"yes" / "confirm"** (or equivalent in their language): write `primary-channel.json` with `confirmed: true`, the current `channel`, `to` (recipient for the hook `to` field: Discord DM = `user:USER_ID`; Feishu DM = open_id, i.e. `ou_` prefix), `sender_id`, `channel_name`, and `confirmed_at` (ISO-8601 now)
-5. On **"no"** (or equivalent): write `primary-channel.json` with `confirmed: false` (or leave it as-is); Matrix DM remains primary
-6. On no reply (session ends without response): do nothing; Matrix DM remains primary
-
-### Changing Primary Channel
-
-When admin says "switch primary channel to [channel]", "change primary to Discord", or similar:
-
-1. Read current `primary-channel.json`
-2. Update fields: `channel`, `to`, `sender_id`, `channel_name`, `confirmed_at`; set `confirmed: true`
-3. Write updated file
-4. Confirm back to admin: "Primary channel switched to [Channel Name]. Daily reminders and proactive notifications will now be sent via [Channel Name]."
-
-### Proactive Notifications via Primary Channel
-
-For the daily keepalive notification (HEARTBEAT step 7), call `notify-admin-keepalive.sh` instead of sending directly in the Matrix DM session. See HEARTBEAT.md for the exact integration.
-
-### Cross-Channel Admin Escalation
-
-When working in a Matrix project/worker room and you hit a decision that requires human admin input that cannot wait for the next heartbeat or scheduled check-in (e.g., unexpected tool failure requiring judgment, irreversible action needing explicit approval, worker conflict needing arbitrage):
-
-**When to escalate**: A project or task is blocked and you cannot proceed without an admin decision.
-
-**How to escalate**:
-
-1. Get your current session key from the session context. Format: `agent:main:matrix:channel:{ROOM_ID}` for group rooms, or `agent:main:matrix:dm:{ADMIN_MATRIX_ID}` for DMs.
-2. Call:
-   ```bash
-   bash /opt/hiclaw/scripts/escalate-to-admin.sh \
-     --source-session "agent:main:matrix:channel:!yourRoomId:domain" \
-     --question "Clear description of the decision needed"
-   ```
-3. If **exit 0**: notify the room that admin input is being sought via primary channel; **pause and wait** — the admin's reply will be injected back as `[ADMIN_REPLY] ...`
-4. If **exit 1** (no primary channel configured, `confirmed: false`, channel is `matrix`, or dispatch failed): @mention the admin directly in the current Matrix room and wait for their reply there
-
-**Receiving the reply**: When `[ADMIN_REPLY] ...` appears in the session, extract the admin's decision and continue the workflow. Acknowledge the decision in the current room with @mentions to the relevant workers.
-
-**Session key format**:
-- DM with admin: `agent:main:matrix:dm:{ADMIN_MATRIX_ID}`
-- Group/project room: `agent:main:matrix:channel:{ROOM_ID}` (room ID = `!xyz:domain`)
 
 ## Safety
 

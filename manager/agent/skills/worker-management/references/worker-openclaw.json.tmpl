@@ -49,13 +49,14 @@
 
   "agents": {
     "defaults": {
+      "timeoutSeconds": 1800,
       "workspace": "~",
       "model": {
         "primary": "hiclaw-gateway/${HICLAW_DEFAULT_MODEL}"
       },
-      "maxConcurrent": 2,
+      "maxConcurrent": 4,
       "subagents": {
-        "maxConcurrent": 4
+        "maxConcurrent": 8
       }
     }
   },

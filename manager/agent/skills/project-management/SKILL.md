@@ -65,36 +65,16 @@ EOF
 
 ### 1c. Create the Project Room
 
-Use the matrix-server-management skill to create a room with Human + Manager + all Workers:
+Use the `create-project.sh` script — it creates the room, invites all participants, and updates `openclaw.json` `groupAllowFrom` so Worker @mentions in the project room trigger you:
 
-```bash
-MANAGER_TOKEN="<manager_access_token from env>"
-curl -X POST http://127.0.0.1:6167/_matrix/client/v3/createRoom \
-  -H "Authorization: Bearer ${MANAGER_TOKEN}" \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "name": "Project: <title>",
-    "topic": "Project room for <title> — managed by @manager",
-    "invite": [
-      "@<admin_user>:<matrix_domain>",
-      "@<worker1>:<matrix_domain>",
-      "@<worker2>:<matrix_domain>"
-    ],
-    "preset": "trusted_private_chat"
-  }'
-```
-
-Save the `room_id` and update meta.json with it.
-
-**Important**: After creating the project room, add all Worker Matrix IDs to your `openclaw.json` `groupAllowFrom` list so their @mentions in the project room trigger you. See the `create-project.sh` script which automates this.
-
-Or use the script directly:
 ```bash
 bash ~/hiclaw-fs/agents/manager/skills/project-management/scripts/create-project.sh \
   --id "${PROJECT_ID}" \
   --title "<title>" \
   --workers "worker1,worker2,worker3"
 ```
+
+Save the returned `room_id` and update meta.json with it.
 
 ### 1d. Present plan to human for confirmation
 
@@ -517,6 +497,7 @@ Document in plan.md Change Log and sync.
 - Changing overall deliverables or project goal
 - Reassigning >2 tasks between Workers
 - Splitting or merging phases that alter the timeline significantly
+- Creating a new Worker role for the project (explain skill gap first; see Step 7)
 
 For major changes:
 1. Draft the proposed change in DM with human admin

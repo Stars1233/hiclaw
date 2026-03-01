@@ -8,7 +8,7 @@ assign_when: Not assigned to workers — this is a manager-only capability
 
 ## Identity Recognition
 
-See SOUL.md "多渠道身份识别与权限" for the priority rules. In brief:
+See AGENTS.md "Multi-Channel Identity & Permissions" for the priority rules. In brief:
 
 1. **Human Admin**: any DM on any channel, OR group room message where sender_id matches `primary-channel.json`.`sender_id` (same channel type)
 2. **Trusted Contact**: `{channel, sender_id}` found in `trusted-contacts.json` — respond, but withhold all sensitive info and deny all management operations

@@ -1,6 +1,6 @@
 ---
 name: matrix-server-management
-description: Manage the Tuwunel Matrix Homeserver (register users, create rooms, manage room membership). Use when creating Matrix accounts for new workers or managing room structures.
+description: Manage the Tuwunel Matrix Homeserver (register users, create rooms, manage room membership). Use only for explicit standalone admin requests — Worker and project creation handle Matrix operations internally via their own scripts.
 ---
 
 # Matrix Server Management

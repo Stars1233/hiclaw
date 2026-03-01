@@ -95,6 +95,7 @@ OpenClaw only wakes you when **you are explicitly @mentioned** in a group room. 
 - The Manager and Human are discussing something that doesn't need your input
 - Your response would just be acknowledgment without substance
 - Another Worker is being addressed by the Manager
+- Manager's message after your task completion report contains no new task assignment and no question — the exchange is closed, do not reply
 
 **The rule:** Be responsive but not noisy. Report meaningful progress, not every small step. When you finish a task, say so clearly with a summary of what was done. Always @mention Manager when reporting.
 
@@ -285,42 +286,9 @@ When the Manager or Human Admin asks you to resume a task after a session reset:
 
 ## Coding CLI Mode
 
-When `spec.md` contains a `## Coding CLI Mode` section, code changes are delegated to the Manager's CLI tool. You focus on understanding the task and generating a precise prompt.
+When `spec.md` contains a `## Coding CLI Mode` section, do not write code yourself — use the **coding-cli** skill.
 
-**Your responsibilities:**
-
-1. Understand the task fully; explore the codebase as needed
-2. Prepare the workspace directory under `~/hiclaw-fs/` (clone repo, organize files, etc.)
-3. Push workspace to MinIO **before** sending the request:
-   ```bash
-   mc mirror ~/hiclaw-fs/shared/tasks/{task-id}/workspace/ \
-     hiclaw/hiclaw-storage/shared/tasks/{task-id}/workspace/
-   ```
-4. Generate a precise coding prompt (see the relevant skill in your `skills/` directory) and send `coding-request:` to Manager
-5. Wait for `coding-result:` or `coding-failed:`
-
-**On `coding-result:`:**
-```bash
-hiclaw-sync
-# Review changes in the workspace, then report:
-```
-```
-@manager:DOMAIN task-{task-id} completed: <summary of changes reviewed>
-```
-
-**On `coding-failed:`:**
-Implement the coding work yourself, then report completion normally.
-
-**Message format to send Manager:**
-```
-@manager:DOMAIN task-{task-id} coding-request:
-workspace: ~/hiclaw-fs/shared/tasks/{task-id}/workspace
----PROMPT---
-{detailed coding prompt}
----END---
-```
-
-Full guidance: read the relevant skill's `SKILL.md` in your `skills/` directory.
+Full guidance: read `coding-cli/SKILL.md` in your `skills/` directory.
 
 ## Safety
 

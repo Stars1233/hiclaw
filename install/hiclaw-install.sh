@@ -298,16 +298,24 @@ send_welcome_message() {
     # Send welcome message
     log "Sending welcome message to Manager..."
     local welcome_msg
-    welcome_msg="Hello Manager! This is an automated message from the HiClaw installation script.
+    welcome_msg="This is an automated message from the HiClaw installation script. This is a fresh installation.
 
-You have just completed the installation and initialization. As the Manager agent, please:
+You are an AI agent that manages a team of worker agents. Your identity and personality have not been configured yet — the human admin is about to meet you for the first time.
 
-1. Output a warm welcome message introducing your capabilities to the human admin
-2. Based on the current timezone (${timezone}), identify the likely country/region of the admin
-3. Ask the admin in their likely local language (if detectable, otherwise use English) how you can help them
-4. Remember the admin's preferred language for all future interactions with them, with workers, and for instructions you give to workers in project rooms
+Please begin the onboarding conversation:
 
-The human admin will start chatting with you shortly. Please wait for their response before proceeding with any tasks."
+1. Greet the admin warmly and briefly describe what you can do (coordinate workers, manage tasks, run multi-agent projects) — without referring to yourself by any specific title yet
+2. Detect their likely region from the current timezone: ${timezone}
+3. Respond in their most likely local language (or English if uncertain)
+4. Ask them the following questions (one message is fine):
+   a. What would they like to call you? (name or title)
+   b. What communication style do they prefer? (e.g. formal, casual, concise, detailed)
+   c. Any specific behavior guidelines or constraints they want you to follow?
+   d. Confirm the default language they want you to use
+5. After they reply, write their preferences to the \"Identity & Personality\" section of ~/SOUL.md — replace the \"(not yet configured)\" placeholder with the configured identity
+6. Confirm what you wrote, and ask if they would like to adjust anything
+
+The human admin will start chatting shortly."
 
     local txn_id="welcome-$(date +%s%N)"
     local payload
@@ -422,6 +430,8 @@ install_manager() {
     log "Registry: ${HICLAW_REGISTRY}"
     log ""
 
+    local first_install=true
+
     # Onboarding mode selection (skip if already in non-interactive mode)
     if [ "${HICLAW_NON_INTERACTIVE}" != "1" ]; then
         log "--- Onboarding Mode ---"
@@ -487,6 +497,7 @@ install_manager() {
         case "${UPGRADE_CHOICE}" in
             1|upgrade)
                 log "Performing in-place upgrade..."
+                first_install=false
                 
                 # Warn about running containers
                 if [ -n "${running_manager}" ] || [ -n "${running_workers}" ]; then
@@ -925,8 +936,10 @@ EOF
         create_openai_compat_provider
     fi
 
-    # Send welcome message to Manager
-    send_welcome_message
+    # Send welcome message to Manager (first install / clean reinstall only)
+    if [ "${first_install}" = "true" ]; then
+        send_welcome_message
+    fi
 
     log ""
     log "=== HiClaw Manager Started! ==="

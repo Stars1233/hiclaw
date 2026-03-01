@@ -1,56 +1,56 @@
 ## Manager Heartbeat Checklist
 
-### 1. 读取 state.json
+### 1. Read state.json
 
-从本地读取 state.json（如未同步，先 mc cp 拉取）：
+Read state.json locally (sync first with mc cp if not already):
 
 ```bash
 mc cp hiclaw/hiclaw-storage/agents/manager/state.json ~/hiclaw-fs/agents/manager/state.json 2>/dev/null || true
 cat ~/hiclaw-fs/agents/manager/state.json
 ```
 
-state.json 的 `active_tasks` 包含所有进行中的任务（有限任务和无限任务）。无需遍历所有 meta.json。
+The `active_tasks` field in state.json contains all in-progress tasks (both finite and infinite). No need to iterate over all meta.json files.
 
 ---
 
-### 2. 有限任务状态询问
+### 2. Check Status of Finite Tasks
 
-遍历 `active_tasks` 中 `"type": "finite"` 的条目：
+Iterate over entries in `active_tasks` with `"type": "finite"`:
 
-- 从条目的 `assigned_to` 和 `room_id` 字段获取负责的 Worker 及对应 Room
-- 在该 Worker 的 Room（或 project_room_id 若有）中 @mention Worker 询问进展：
+- Get the responsible Worker and corresponding Room from the entry's `assigned_to` and `room_id` fields
+- @mention the Worker in their Room (or `project_room_id` if available) to ask for progress:
   ```
-  @{worker}:{domain} 你当前的任务 {task-id} 进展如何？有没有遇到阻塞？
+  @{worker}:{domain} How is your current task {task-id} going? Are you blocked on anything?
   ```
-- 根据 Worker 回复判断是否正常推进
-- 如果 Worker 未回复（超过一个 heartbeat 周期无响应），在 Room 中标记异常并提醒人类管理员
-- 如果 Worker 已回复完成但 meta.json 未更新，主动更新 meta.json（status → completed，填写 completed_at），并从 state.json 的 `active_tasks` 中删除该条目
+- Determine if the Worker is making normal progress based on their reply
+- If the Worker has not responded (no response for more than one heartbeat cycle), flag the anomaly in the Room and notify the human admin
+- If the Worker has replied that the task is complete but meta.json has not been updated, proactively update meta.json (status → completed, fill in completed_at), and remove the entry from `active_tasks` in state.json
 
 ---
 
-### 3. 无限任务超时检查
+### 3. Check Infinite Task Timeouts
 
-遍历 `active_tasks` 中 `"type": "infinite"` 的条目，对每个条目：
+Iterate over entries in `active_tasks` with `"type": "infinite"`. For each entry:
 
 ```
-当前时间 UTC = now
+Current UTC time = now
 
-判断条件（同时满足）：
-  1. last_executed_at < next_scheduled_at（本轮尚未执行）
-     或 last_executed_at 为 null（从未执行）
-  2. now > next_scheduled_at + 30分钟（已超时未执行）
+Conditions (both must be met):
+  1. last_executed_at < next_scheduled_at (not yet executed this cycle)
+     OR last_executed_at is null (never executed)
+  2. now > next_scheduled_at + 30 minutes (overdue)
 
-若满足，在对应 room_id 中 @mention Worker 触发执行：
-  @{worker}:{domain} 该执行你的定时任务 {task-id}「{task-title}」了，请现在执行并用 "executed" 关键字汇报。
+If conditions are met, @mention the Worker in the corresponding room_id to trigger execution:
+  @{worker}:{domain} It's time to run your scheduled task {task-id} "{task-title}". Please execute it now and report back with the keyword "executed".
 ```
 
-**注意**：无限任务永不从 active_tasks 中删除。Worker 汇报 `executed` 后，Manager 更新 `last_executed_at` 和 `next_scheduled_at`，然后 mc cp 同步 state.json。
+**Note**: Infinite tasks are never removed from active_tasks. After the Worker reports `executed`, the Manager updates `last_executed_at` and `next_scheduled_at`, then syncs state.json via mc cp.
 
 ---
 
-### 4. 项目进展监控
+### 4. Project Progress Monitoring
 
-扫描 ~/hiclaw-fs/shared/projects/ 下所有活跃项目的 plan.md：
+Scan plan.md for all active projects under ~/hiclaw-fs/shared/projects/:
 
 ```bash
 for meta in ~/hiclaw-fs/shared/projects/*/meta.json; do
@@ -58,58 +58,58 @@ for meta in ~/hiclaw-fs/shared/projects/*/meta.json; do
 done
 ```
 
-- 筛选 `"status": "active"` 的项目
-- 对每个活跃项目，读取 plan.md，找出标记为 `[~]`（进行中）的任务
-- 若该 Worker 在本 heartbeat 周期内没有活动，在项目群中 @mention：
+- Filter projects with `"status": "active"`
+- For each active project, read plan.md and find tasks marked as `[~]` (in progress)
+- If the responsible Worker has had no activity during this heartbeat cycle, @mention them in the project room:
   ```
-  @{worker}:{domain} 你正在执行的任务 {task-id}「{title}」有进展吗？有遇到阻塞请告知。
+  @{worker}:{domain} Any progress on your current task {task-id} "{title}"? Please let us know if you're blocked.
   ```
-- 如果项目群中有 Worker 汇报了任务完成但 plan.md 还没更新，立即处理（见 AGENTS.md 项目管理部分）
+- If a Worker has reported task completion in the project room but plan.md has not been updated yet, handle it immediately (see the project management section in AGENTS.md)
 
 ---
 
-### 5. 容量评估
+### 5. Capacity Assessment
 
-- 统计 state.json 中 type=finite 的条目数（有限任务进行中数量）和没有分配任务的空闲 Worker
-- 如果 Worker 不足，循环人类管理员是否需要创建新的 Worker
-- 如果有 Worker 空闲，建议重新分配任务
+- Count the number of `type=finite` entries in state.json (finite tasks in progress) and identify idle Workers with no assigned tasks
+- If Workers are insufficient, check in with the human admin about whether new Workers need to be created
+- If Workers are idle, suggest reassigning tasks
 
 ---
 
-### 6. Worker 容器生命周期管理
+### 6. Worker Container Lifecycle Management
 
-仅当容器 API 可用时执行（先检查）：
+Only execute when the container API is available (check first):
 
 ```bash
 bash -c 'source /opt/hiclaw/scripts/lib/container-api.sh && container_api_available && echo available'
 ```
 
-若输出 `available`，继续执行以下步骤：
+If the output is `available`, proceed with the following steps:
 
-1. 同步状态：
+1. Sync status:
    ```bash
    bash /opt/hiclaw/agent/skills/worker-management/scripts/lifecycle-worker.sh --action sync-status
    ```
 
-2. 检测空闲：对每个 Worker，若 state.json 中无其 finite task 且 container_status=running：
-   - 若 idle_since 未设置，设为当前时间
-   - 若 (now - idle_since) > idle_timeout_minutes，执行自动停止：
+2. Detect idle Workers: For each Worker, if there are no finite tasks for them in state.json and container_status=running:
+   - If idle_since is not set, set it to the current time
+   - If (now - idle_since) > idle_timeout_minutes, perform auto-stop:
      ```bash
      bash /opt/hiclaw/agent/skills/worker-management/scripts/lifecycle-worker.sh --action check-idle
      ```
-   - 在 Manager 与该 Worker 的 Room 中记录：
-     「Worker <name> 容器已因空闲超时自动暂停。有任务时将自动唤醒。」
+   - Log in the Manager's Room with that Worker:
+     "Worker <name> container has been automatically paused due to idle timeout. It will be automatically resumed when a task is assigned."
 
-3. 若有正在运行 finite task 的 Worker 但其容器状态为 stopped（异常情况），执行启动并告警：
+3. If a Worker has a running finite task but its container status is stopped (anomaly), start it and send an alert:
    ```bash
    bash /opt/hiclaw/agent/skills/worker-management/scripts/lifecycle-worker.sh --action start --worker <name>
    ```
 
 ---
 
-### 7. 每日保活提醒（仅在 10:00–10:59 执行一次）
+### 7. Daily Keepalive Reminder (Execute Once Between 10:00–10:59 Only)
 
-执行条件：`date +%H` 输出 `10`，且 `load-prefs` 的 `PREFS_DATE` 不是今天。
+Execution condition: `date +%H` outputs `10`, and `load-prefs` shows `PREFS_DATE` is not today.
 
 ```bash
 HOUR=$(date +%H)
@@ -117,51 +117,50 @@ if [ "$HOUR" = "10" ]; then
     PREFS_DATE=$(bash /opt/hiclaw/scripts/session-keepalive.sh --action load-prefs | grep '^PREFS_DATE:' | cut -d' ' -f2)
     TODAY=$(date '+%Y-%m-%d')
     if [ "$PREFS_DATE" != "$TODAY" ]; then
-        # 执行每日保活提醒流程（见下）
+        # Execute daily keepalive reminder flow (see below)
     fi
 fi
 ```
 
-满足条件时，流程如下：
+When conditions are met, proceed as follows:
 
-1. 获取当前活跃房间列表：
+1. Get the current list of active rooms:
    ```bash
    bash /opt/hiclaw/scripts/session-keepalive.sh --action list-rooms
    ```
-   输出格式：`ROOM: room_id\ttype\tname`
+   Output format: `ROOM: room_id\ttype\tname`
 
-2. 获取昨日偏好：
+2. Get yesterday's preferences:
    ```bash
    bash /opt/hiclaw/scripts/session-keepalive.sh --action load-prefs
    ```
-   输出：`PREFS_DATE:`、`PREFS_APPLIED:`、`PREFS_ROOM:` 行
+   Output: `PREFS_DATE:`, `PREFS_APPLIED:`, `PREFS_ROOM:` lines
 
-3. 尝试通过主用频道发送通知：
+3. Attempt to send notification via the primary channel:
 
    ```bash
    NOTIFY_RESULT=$(bash /opt/hiclaw/scripts/notify-admin-keepalive.sh 2>&1)
    NOTIFY_EXIT=$?
    ```
 
-   - 若 `NOTIFY_EXIT` 为 **0**：通知已通过主用频道分发，mark-notified 已调用，**跳过步骤 4 和 5**，直接结束此步骤
-   - 若 `NOTIFY_EXIT` 为 **1**（无非 Matrix 主用频道或分发失败）：继续执行步骤 4 和 5（Matrix DM 回退）
+   - If `NOTIFY_EXIT` is **0**: Notification has been distributed via the primary channel, mark-notified has been called. **Skip steps 4 and 5** and end this step.
+   - If `NOTIFY_EXIT` is **1** (no non-Matrix primary channel or distribution failed): Continue with steps 4 and 5 (Matrix DM fallback).
 
-4. （仅在步骤 3 返回 1 时执行）在与 **Human Admin 的 DM** 中发送保活提醒消息，内容须包含：
-   - 当前活跃的 Worker 房间和项目房间列表（group 类型，空闲超 2 天后重置）
-   - 说明为何需要保活：若不保活，Worker 在对应房间的对话历史将在 2 天内清空，导致后续对话丢失上下文；如有未完成任务，建议保活
-   - 说明不保活的好处：减少 token 开销（历史消息越长，每次 LLM 调用消耗越多）
-   - 列出昨日保活选择（若有 `PREFS_ROOM:` 行），询问是否继续或调整
-   - 提示：回复「继续」直接复用昨日选择，提供新列表则更新，回复「不需要」跳过今日保活
+4. (Only if step 3 returned 1) Send a keepalive reminder message in the **DM with Human Admin**, including:
+   - The current list of active Worker rooms and project rooms (group type, reset after 2 days of inactivity)
+   - Explanation of why keepalive is needed: without it, the Worker's conversation history in the corresponding room will be cleared within 2 days, causing loss of context in future conversations; keepalive is recommended if there are unfinished tasks
+   - Explanation of the benefit of skipping keepalive: reduced token cost (longer history means more tokens consumed per LLM call)
+   - List yesterday's keepalive choices (if `PREFS_ROOM:` lines exist) and ask whether to continue or adjust
+   - Hint: reply "continue" to reuse yesterday's choices, provide a new list to update, or reply "skip" to skip today's keepalive
 
-5. （仅在步骤 3 返回 1 时执行）运行 mark-notified：
+5. (Only if step 3 returned 1) Run mark-notified:
    ```bash
    bash /opt/hiclaw/scripts/session-keepalive.sh --action mark-notified
    ```
 
 ---
 
-### 8. 回复
+### 8. Reply
 
-- 如果所有 Worker 正常且无待处理事项：HEARTBEAT_OK
-- 否则：汇总发现和建议的操作，通知人类管理员
-
+- If all Workers are healthy and there are no pending items: HEARTBEAT_OK
+- Otherwise: Summarize findings and recommended actions, and notify the human admin
