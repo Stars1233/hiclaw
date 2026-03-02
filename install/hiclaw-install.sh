@@ -27,6 +27,7 @@
 #   HICLAW_INSTALL_WORKER_IMAGE   Override worker image  (e.g., local build)
 #   HICLAW_PORT_GATEWAY       Host port for Higress gateway (default: 18080)
 #   HICLAW_PORT_CONSOLE       Host port for Higress console (default: 18001)
+#   HICLAW_PORT_ELEMENT_WEB   Host port for Element Web direct access (default: 18088)
 
 set -e
 
@@ -776,6 +777,7 @@ install_manager() {
     log "--- Port Configuration (press Enter for defaults) ---"
     prompt HICLAW_PORT_GATEWAY "Host port for gateway (8080 inside container)" "18080"
     prompt HICLAW_PORT_CONSOLE "Host port for Higress console (8001 inside container)" "18001"
+    prompt HICLAW_PORT_ELEMENT_WEB "Host port for Element Web direct access (8088 inside container)" "18088"
 
     log ""
 
@@ -851,6 +853,7 @@ HICLAW_ADMIN_PASSWORD=${HICLAW_ADMIN_PASSWORD}
 # Ports
 HICLAW_PORT_GATEWAY=${HICLAW_PORT_GATEWAY}
 HICLAW_PORT_CONSOLE=${HICLAW_PORT_CONSOLE}
+HICLAW_PORT_ELEMENT_WEB=${HICLAW_PORT_ELEMENT_WEB}
 
 # Matrix
 HICLAW_MATRIX_DOMAIN=${HICLAW_MATRIX_DOMAIN}
@@ -965,6 +968,7 @@ EOF
         ${SOCKET_MOUNT_ARGS} \
         -p "${HICLAW_PORT_GATEWAY}:8080" \
         -p "${HICLAW_PORT_CONSOLE}:8001" \
+        -p "${HICLAW_PORT_ELEMENT_WEB:-18088}:8088" \
         ${DATA_MOUNT_ARGS} \
         ${WORKSPACE_MOUNT_ARGS} \
         ${HOST_SHARE_MOUNT_ARGS} \
@@ -1003,6 +1007,26 @@ EOF
     echo -e "\033[33m  After login, start chatting with the Manager!                                  \033[0m"
     echo -e "\033[33m    Tell it: \"Create a Worker named alice for frontend dev\"                      \033[0m"
     echo -e "\033[33m    The Manager will handle everything automatically.                            \033[0m"
+    echo -e "\033[33m                                                                                 \033[0m"
+    echo -e "\033[33m  ─────────────────────────────────────────────────────────────────────────────  \033[0m"
+    echo -e "\033[33m  🌐 LAN Browser access (other devices on the same network):                    \033[0m"
+    echo -e "\033[33m                                                                                 \033[0m"
+    if [ -n "${lan_ip}" ]; then
+    echo -e "\033[33m    Open in browser: \033[1;36mhttp://${lan_ip}:${HICLAW_PORT_ELEMENT_WEB:-18088}/#/login\033[0m"
+    echo -e "\033[33m    (Element Web served directly — no custom domain needed)                     \033[0m"
+    echo -e "\033[33m    Login with:                                                                  \033[0m"
+    echo -e "\033[33m      Username: \033[1;32m${HICLAW_ADMIN_USER}\033[0m"
+    echo -e "\033[33m      Password: \033[1;32m${HICLAW_ADMIN_PASSWORD}\033[0m"
+    echo -e "\033[33m    Homeserver: \033[1;36mhttp://${lan_ip}:${HICLAW_PORT_GATEWAY}\033[0m"
+    else
+    echo -e "\033[33m    Open in browser: \033[1;36mhttp://<this-machine-LAN-IP>:${HICLAW_PORT_ELEMENT_WEB:-18088}/#/login\033[0m"
+    echo -e "\033[33m    (Element Web served directly — no custom domain needed)                     \033[0m"
+    echo -e "\033[33m    Login with:                                                                  \033[0m"
+    echo -e "\033[33m      Username: \033[1;32m${HICLAW_ADMIN_USER}\033[0m"
+    echo -e "\033[33m      Password: \033[1;32m${HICLAW_ADMIN_PASSWORD}\033[0m"
+    echo -e "\033[33m    Homeserver: \033[1;36mhttp://<this-machine-LAN-IP>:${HICLAW_PORT_GATEWAY}\033[0m"
+    echo -e "\033[33m    (Could not detect LAN IP — check with: ifconfig / ip addr)                  \033[0m"
+    fi
     echo -e "\033[33m                                                                                 \033[0m"
     echo -e "\033[33m  ─────────────────────────────────────────────────────────────────────────────  \033[0m"
     echo -e "\033[33m  📱 Mobile access (FluffyChat / Element Mobile):                               \033[0m"
