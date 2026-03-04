@@ -91,6 +91,12 @@ Alice: On it... [a few minutes later]
        Done. PR submitted: https://github.com/xxx/pull/1
 ```
 
+<p align="center">
+  <img src="https://img.alicdn.com/imgextra/i4/O1CN01wHWaJQ29KV3j5vryD_!!6000000008049-0-tps-589-1280.jpg" width="280" alt="Manager creates Worker" />
+  &nbsp;&nbsp;&nbsp;&nbsp;
+  <img src="https://img.alicdn.com/imgextra/i2/O1CN01q9L67J245mFT0fPXH_!!6000000007340-0-tps-589-1280.jpg" width="280" alt="Human directs Worker directly" />
+</p>
+
 The Manager also runs periodic heartbeats — if a Worker gets stuck, it alerts you automatically.
 
 ### Security model
