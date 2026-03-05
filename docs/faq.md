@@ -1,5 +1,6 @@
 # FAQ
 
+- [Installation script exits immediately on Windows](#installation-script-exits-immediately-on-windows)
 - [Manager Agent startup timeout](#manager-agent-startup-timeout)
 - [Accessing the web UI from other devices on the LAN](#accessing-the-web-ui-from-other-devices-on-the-lan)
 - [Cannot connect to Matrix server locally](#cannot-connect-to-matrix-server-locally)
@@ -9,6 +10,12 @@
 - [Does HiClaw support sending and receiving files](#does-hiclaw-support-sending-and-receiving-files)
 - [Why does Manager/Worker keep showing "typing"](#why-does-managerworker-keep-showing-typing)
 - [Manager not responding or returning error status codes](#manager-not-responding-or-returning-error-status-codes)
+
+---
+
+## Installation script exits immediately on Windows
+
+If the PowerShell installation script closes immediately after launching, first check whether Docker Desktop is installed. If it is installed, make sure it is actually running — Docker Desktop must be started and fully loaded before the script can connect to the Docker daemon.
 
 ---
 

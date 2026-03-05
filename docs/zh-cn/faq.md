@@ -1,5 +1,6 @@
 # 常见问题
 
+- [Windows 下执行安装脚本闪退](#windows-下执行安装脚本闪退)
 - [Manager Agent 启动超时](#manager-agent-启动超时)
 - [局域网其他电脑如何访问 Web 端](#局域网其他电脑如何访问-web-端)
 - [本地访问 Matrix 服务器不通](#本地访问-matrix-服务器不通)
@@ -9,6 +10,12 @@
 - [HiClaw 支持发送和接收文件吗](#hiclaw-支持发送和接收文件吗)
 - [为什么 Manager/Worker 一直显示"输入中"](#为什么-managerworker-一直显示输入中)
 - [在房间里和 Manager 聊天没有响应或返回错误状态码](#在房间里和-manager-聊天没有响应或返回错误状态码)
+
+---
+
+## Windows 下执行安装脚本闪退
+
+如果在 Windows 下执行 PowerShell 安装脚本后窗口立即关闭，请先确认是否已安装 Docker Desktop。如果已安装，请确认 Docker Desktop 是否已启动并完全加载——脚本需要连接 Docker 守护进程，Docker Desktop 未运行时会直接失败退出。
 
 ---
 
