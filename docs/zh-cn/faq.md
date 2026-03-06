@@ -146,10 +146,10 @@ http://<局域网IP>:18080
 
 ```bash
 # Manager
-docker exec -it hiclaw-manager ls /root/.openclaw/agents/main/sessions/
+docker exec -it hiclaw-manager ls .openclaw/agents/main/sessions/
 
 # Worker（将 <worker-name> 替换为实际容器名）
-docker exec -it <worker-name> ls /root/.openclaw/agents/main/sessions/
+docker exec -it <worker-name> ls .openclaw/agents/main/sessions/
 ```
 
 该目录下的 `.jsonl` 文件由 OpenClaw 实时写入，记录了完整的 Agent 执行过程，包括 LLM 调用、工具使用、推理步骤等。
