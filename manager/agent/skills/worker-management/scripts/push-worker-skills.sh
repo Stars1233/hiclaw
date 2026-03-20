@@ -105,27 +105,23 @@ _push_skill_to_worker() {
     local skill="$2"
     local skill_dst="${HICLAW_STORAGE_PREFIX}/agents/${worker}/skills/${skill}/"
 
-    if [ "${skill}" = "file-sync" ]; then
-        # Use runtime-specific file-sync skill
-        local worker_runtime
-        worker_runtime=$(echo "${REGISTRY}" | jq -r --arg w "${worker}" '.workers[$w].runtime // "openclaw"')
-        local file_sync_src
-        if [ "${worker_runtime}" = "copaw" ]; then
-            file_sync_src="/opt/hiclaw/agent/copaw-worker-agent/skills/file-sync"
-        else
-            file_sync_src="/opt/hiclaw/agent/worker-agent/skills/file-sync"
-        fi
-        if [ ! -d "${file_sync_src}" ]; then
-            log "  WARNING: file-sync source not found: ${file_sync_src}"
-            return 1
-        fi
-        log "  Pushing skill 'file-sync' (runtime=${worker_runtime}) to worker '${worker}'..."
-        mc mirror "${file_sync_src}/" "${HICLAW_STORAGE_PREFIX}/agents/${worker}/skills/file-sync/" --overwrite \
+    # Runtime-specific skills: check if skill exists in worker-agent or copaw-worker-agent
+    local worker_runtime
+    worker_runtime=$(echo "${REGISTRY}" | jq -r --arg w "${worker}" '.workers[$w].runtime // "openclaw"')
+    local _rt_src
+    if [ "${worker_runtime}" = "copaw" ]; then
+        _rt_src="/opt/hiclaw/agent/copaw-worker-agent/skills/${skill}"
+    else
+        _rt_src="/opt/hiclaw/agent/worker-agent/skills/${skill}"
+    fi
+    if [ -d "${_rt_src}" ]; then
+        log "  Pushing skill '${skill}' (runtime=${worker_runtime}) to worker '${worker}'..."
+        mc mirror "${_rt_src}/" "${skill_dst}" --overwrite \
             2>&1 | tail -3 || {
-            log "  WARNING: Failed to push skill 'file-sync' to worker '${worker}'"
+            log "  WARNING: Failed to push skill '${skill}' to worker '${worker}'"
             return 1
         }
-        log "  Pushed skill 'file-sync' to worker '${worker}'"
+        log "  Pushed skill '${skill}' to worker '${worker}'"
         return 0
     fi
 
@@ -198,6 +194,13 @@ if [ -n "${ADD_SKILL}" ] && [ -n "${WORKER_NAME}" ]; then
         exit 1
     fi
 
+    # Verify skill source exists before updating registry
+    _add_skill_src="${WORKER_SKILLS_DIR}/${ADD_SKILL}"
+    if [ ! -d "${_add_skill_src}" ]; then
+        log "ERROR: Skill source not found: ${_add_skill_src}"
+        exit 1
+    fi
+
     ALREADY=$(echo "${REGISTRY}" | jq -r --arg w "${WORKER_NAME}" --arg s "${ADD_SKILL}" \
         '.workers[$w].skills // [] | map(select(. == $s)) | length')
     if [ "${ALREADY}" -gt 0 ]; then
@@ -217,10 +220,15 @@ if [ -n "${REMOVE_SKILL}" ] && [ -n "${WORKER_NAME}" ]; then
         exit 1
     fi
 
-    if [ "${REMOVE_SKILL}" = "file-sync" ]; then
-        log "ERROR: Cannot remove bootstrap skill 'file-sync'"
-        exit 1
-    fi
+    # Builtin skills are always present (pushed from worker-agent/skills/ or
+    # copaw-worker-agent/skills/) and must not be removed from the registry.
+    BUILTIN_SKILLS=("file-sync" "task-progress" "project-participation" "mcporter" "find-skills")
+    for _bs in "${BUILTIN_SKILLS[@]}"; do
+        if [ "${REMOVE_SKILL}" = "${_bs}" ]; then
+            log "ERROR: Cannot remove builtin skill '${_bs}'"
+            exit 1
+        fi
+    done
 
     REGISTRY=$(echo "${REGISTRY}" | jq --arg w "${WORKER_NAME}" --arg s "${REMOVE_SKILL}" \
         '.workers[$w].skills = [.workers[$w].skills // [] | .[] | select(. != $s)]')
