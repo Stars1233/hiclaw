@@ -6,9 +6,24 @@ Record image-affecting changes to `manager/`, `worker/`, `openclaw-base/` here b
 
 **What's New**
 
-- **Team, Human & Declarative Management (hiclaw-controller)** — Introduced the `hiclaw-controller` binary for declarative resource management. Define Teams, Humans, and Workers as YAML resources and apply them with `hiclaw apply`. Teams group Workers under a leader with shared goals; Humans bind Matrix users to Workers for direct interaction. The controller watches for resource changes and reconciles state automatically. Supports inline `identity`, `soul`, and `agents` fields for Worker configuration, eliminating the need for separate files.
+- **Declarative Resource Management (hiclaw-controller)** — Introduced `hiclaw-controller` for Kubernetes-style declarative resource management. Define Workers, Teams, and Humans as YAML resources and apply them with `hiclaw apply`. The controller watches for changes and reconciles state automatically — create a YAML, apply it, and the corresponding Docker containers, Matrix rooms, and gateway routes are provisioned without manual intervention. Three CRD types are supported:
+  - **Worker**: Full agent lifecycle (create, update, delete) with package imports, inline `identity`/`soul`/`agents` fields, and `channelPolicy` for fine-grained communication control.
+  - **Team**: Groups Workers under a Team Leader agent with shared goals, isolated storage, and automatic onboarding/offboarding.
+  - **Human**: Binds a Matrix user to specific Workers for direct human-agent interaction.
 
-- **MCP Proxy Support** — New `mcp-proxy` feature allows proxying existing MCP servers through the HiClaw gateway, enabling Workers to access external MCP tools without direct network exposure.
+- **Worker Template Marketplace** — New template-driven Worker creation flow via `hiclaw-find-worker` Manager skill. Instead of manually configuring Workers from scratch, the Manager searches a Nacos-backed template registry (default: `market.hiclaw.io`), recommends matching templates based on requirements, and imports them after admin confirmation. Supports package shorthand syntax, URL-encoded paths, and consistent behavior across market and registry sources. Workers can be bootstrapped from templates in one step: `hiclaw apply -f my-worker.yaml` with a `package` reference.
+
+- **MCP Direct Proxy** — Building on the API-to-MCP gateway introduced in v1.0.6, this release adds **MCP direct proxy** support for connecting existing MCP servers through the Higress gateway. While v1.0.6 converts HTTP APIs into MCP tools (API→MCP), MCP direct proxy allows proxying already-MCP-compatible servers (e.g., Sentry, Notion, Asana MCP servers) with auto-generated auth schemes and SSE/StreamableHTTP transport handling. Workers access proxied MCP tools through the same credential-zero-trust security model — real tokens never leave the gateway.
+
+- **Team Leader Agent with DAG Orchestration** — Introduced a dedicated Team Leader agent that coordinates Workers within a Team. The Team Leader manages hierarchical task delegation, project-based work organization, and **DAG (Directed Acyclic Graph) execution** — complex multi-step tasks are decomposed into dependency graphs and executed in parallel where possible. Each Team gets isolated storage and its own communication channels, enabling multi-team isolation.
+
+- **Service Publishing via Worker Expose** — Workers can now expose HTTP services through the Higress gateway using the `expose` field in Worker/Team CRDs. The controller auto-generates domain names (e.g., `worker-alice-8080-local.hiclaw.io`) and configures gateway routing, making worker-hosted web apps and APIs externally accessible without manual networking configuration.
+
+- **CoPaw Runtime for Manager** — Manager container now supports the CoPaw (Python-based) runtime as an alternative to the Node.js OpenClaw runtime, extending the multi-runtime strategy to the Manager role.
+
+- **Default Embedding Model** — Added default embedding model (`text-embedding-v4`) support for Manager and Worker, with OpenClaw→CoPaw bridge for cross-runtime compatibility.
+
+- **Unified Skill Registry** — Reworked Worker `find-skills` discovery with a unified `hiclaw-find-skill` wrapper supporting both skills.sh (HTTPS) and Nacos backends. The backend is auto-inferred from `HICLAW_SKILLS_API_URL`, with Nacos as the new default (`nacos://market.hiclaw.io/public`). Installed `@nacos-group/cli` in Worker images for direct Nacos workflows.
 
 - **OpenClaw CMS Plugin Integration** — Manager now integrates `openclaw-cms-plugin` install and runtime wiring, extending the agent's content management capabilities.
 
@@ -24,191 +39,144 @@ Record image-affecting changes to `manager/`, `worker/`, `openclaw-base/` here b
 
 - **Multi-Phase Collaboration Protocol** — Added multi-phase collaboration protocol to task-lifecycle, improving coordination between Manager and Workers on complex tasks.
 
-- **Template Import Flow** — Added `hiclaw-find-worker` as a dedicated Manager skill so worker creation can follow the template/package-import flow and avoid manually creating workers.
-
-- **Template Package Shorthand** — Added shorthand package syntax with optional version and defaults to simplify worker template imports.
-
-- **Generalized Template Imports** — Expanded the `hiclaw-find-worker` import flow so market and registry template imports behave consistently.
-
-- **Market Worker Import Flow** — Refined market worker import behaviour for cleaner path handling and clearer completion.
-
 **Bug Fixes**
 
-- Fixed stale local declarative config after delete in embedded mode — `start-mc-mirror.sh` now mirrors `hiclaw-config/` with `--remove`, so deleting a resource removes the corresponding local watched YAML instead of leaving stale files under `/root/hiclaw-fs/hiclaw-config/`.
+- Fixed stale local declarative config after delete in embedded mode — `start-mc-mirror.sh` now mirrors `hiclaw-config/` with `--remove`, so deleting a resource removes the corresponding local watched YAML.
 
-- Fixed `hiclaw apply` silently ignoring all resources — `loadResources()` called `strings.TrimSpace(line)` first then checked `strings.HasPrefix(line, "  name:")` which could never match after trimming. Fixed by checking `strings.HasPrefix(line, "name:")` on the already-trimmed line.
+- Fixed `hiclaw apply` silently ignoring all resources — `loadResources()` parsing bug where trimmed lines could never match indented name prefix.
 
-- Fixed stuck `Phase="Pending"` resources after failed package resolution — `r.Status().Update()` could silently fail due to resource version conflict, leaving workers permanently stuck. Fixed by refreshing the object via `r.Get()` before error-path status updates and treating `Phase="Pending"` with non-empty error `Message` as retriable.
+- Fixed stuck `Phase="Pending"` resources after failed package resolution — refresh object before error-path status updates and treat pending-with-error as retriable.
 
-- Fixed concurrent route authorization in gateway — added optimistic locking retry to prevent race conditions when multiple Workers register routes simultaneously.
+- Fixed concurrent route authorization in gateway — added optimistic locking retry for simultaneous Worker route registrations.
 
-- Fixed cloud worker OSS access security — in cloud mode (Alibaba Cloud SAE), all workers shared the same RRSA role with unrestricted OSS bucket access. Now `oss-credentials.sh` injects an inline STS policy restricting tokens to `agents/{worker}/*` and `shared/*` prefixes only.
+- Fixed cloud worker OSS access security — STS inline policy restricts tokens to `agents/{worker}/*` and `shared/*` prefixes.
 
-- Fixed Docker container escape risk — added Docker API proxy (`hiclaw-docker-proxy`) to restrict container access to the Docker daemon, preventing potential container escape attacks.
+- Fixed Docker container escape risk — added `hiclaw-docker-proxy` to restrict container access to Docker daemon.
 
-- Fixed `create-worker.sh` robustness — added Matrix room deduplication check and failure notification to prevent silent failures when room creation encounters conflicts.
+- Fixed `create-worker.sh` robustness — added Matrix room dedup check and failure notification.
 
-- Fixed `state.json` registration — enforce registration for all task types and add idle-stop safety to prevent Workers from being stopped while tasks are active.
+- Fixed `state.json` registration — enforce registration for all task types, add idle-stop safety.
 
-- Fixed Element Web CSP violation — use external JS file for browser bypass instead of inline script to comply with Content Security Policy.
+- Fixed Element Web CSP violation — external JS file instead of inline script.
 
-- Fixed Worker OSS paths — added writable OSS paths to openclaw worker AGENTS.md for cloud deployments.
+- Fixed auto-refresh STS credentials for all `mc` invocations via `mc-wrapper.sh`.
 
-- Fixed auto-refresh STS credentials for all `mc` invocations — wrapped mc binary with `mc-wrapper.sh` that calls `ensure_mc_credentials` before every invocation, preventing token expiry after ~50 minutes in cloud mode.
+- Fixed CoPaw STS credential refresh in Python sync loops.
 
-- Fixed CoPaw STS credential refresh in Python sync loops to prevent MinIO sync failure after token expiry.
+- Fixed cloud runtime detection — explicit `HICLAW_RUNTIME=aliyun` in Dockerfile.aliyun.
 
-- Fixed cloud runtime detection — set `HICLAW_RUNTIME=aliyun` explicitly in Dockerfile.aliyun; respect pre-set `HICLAW_RUNTIME` in hiclaw-env.sh instead of always auto-detecting.
+- Fixed reliable welcome message delivery with proper runtime detection.
 
-- Fixed reliable welcome message delivery in cloud deployment with proper runtime detection.
+- Fixed Worker import: deploy cron jobs from zip, add install hints, update CLI usage.
 
-- Fixed Worker import: deploy cron jobs from zip to worker; add install command hints when HiClaw is not found; update migrate skill import command with correct CLI usage.
+- Fixed reinstall bug in PowerShell script; clean up docker-proxy and hiclaw-net on reinstall.
 
-- Fixed reinstall bug in PowerShell script; clean up docker-proxy container and hiclaw-net network on reinstall.
+- Fixed Worker containers not added to hiclaw-net network.
 
-- Fixed Worker containers not added to hiclaw-net network for service connectivity.
+- Fixed install UX: friendly labels instead of env var names in upgrade prompts.
 
-- Fixed install UX: show friendly labels instead of env var names in upgrade prompts.
-
-- Fixed unused openclaw hooks config causing startup failure — removed the config.
+- Fixed unused openclaw hooks config causing startup failure.
 
 - Fixed shell script safety in Manager init scripts.
 
-- Fixed explicit Matrix room join with retry before sending welcome message to prevent race condition.
+- Fixed explicit Matrix room join with retry before sending welcome message.
 
-- Fixed worker template package path encoding by URL-encoding package paths during import requests.
+- Fixed worker template package path encoding (URL-encoding).
 
-- Fixed controller preflight by using lightweight agentspec checks and requiring online agentspec versions.
+- Fixed controller preflight with lightweight agentspec checks.
 
-- Fixed anonymous preflight for agent specs by switching anonymous preflight to agentspec list checks.
-
-- Support `HICLAW_NACOS_USERNAME` and `HICLAW_NACOS_PASSWORD` as default Nacos credentials when `nacos://` URIs omit `user:pass@`; extract Nacos address from URI and add preflight validation.
-
-- Install `@nacos-group/cli` in Worker images so both OpenClaw and CoPaw workers can call `nacos-cli` directly for Nacos-backed skill and agentspec workflows.
-
-- Rework Worker `find-skills` discovery — introduce the `hiclaw-find-skill` wrapper for both OpenClaw and CoPaw workers, infer the backend from `HICLAW_SKILLS_API_URL` (`https://...` for skills.sh, `nacos://host[:port][/namespace]` for Nacos with default port `8848`), surface the resolved registry in command output, propagate registry/Nacos auth during install and Worker creation, and improve Nacos recall/ranking with regression coverage for `react performance` and `pr review`.
-
-- Simplify Worker-facing `find-skills` guidance so registry/backend details stay internal to the runtime and are not exposed in Worker skill docs.
-
-- Default `HICLAW_SKILLS_API_URL` to `nacos://market.hiclaw.io/public` for install flows and Manager-created Workers.
-
-- Added Manager-side worker template search/import flow backed by Nacos AgentSpecs, so the Manager can recommend matching templates and install them after admin confirmation.
+- Fixed `hiclaw-find-worker` reading local `~/.nacos-cli/default.conf` overriding defaults.
 
 ---
 
 **新增功能**
 
-- **Team、Human 与声明式管理 (hiclaw-controller)** — 引入 `hiclaw-controller` 二进制文件实现声明式资源管理。通过 YAML 定义 Team、Human 和 Worker 资源，使用 `hiclaw apply` 应用。Team 将 Worker 组织在 leader 下共享目标；Human 将 Matrix 用户绑定到 Worker 实现直接交互。Controller 监听资源变更并自动协调状态。支持 Worker 配置中的内联 `identity`、`soul`、`agents` 字段，无需单独文件。
+- **声明式资源管理 (hiclaw-controller)** — 引入 Kubernetes 风格的声明式资源管理。通过 YAML 定义 Worker、Team 和 Human 资源，使用 `hiclaw apply` 一键应用。Controller 自动监听变更并协调状态 — 创建 YAML、apply 之后，对应的 Docker 容器、Matrix 房间和网关路由自动就绪，无需手动干预。支持三种 CRD 类型：
+  - **Worker**：完整的 Agent 生命周期管理，支持包导入、内联 `identity`/`soul`/`agents` 字段、`channelPolicy` 通信策略。
+  - **Team**：将 Worker 组织在 Team Leader 下，共享目标、隔离存储、自动成员管理。
+  - **Human**：将 Matrix 用户绑定到特定 Worker，实现人与 Agent 的直接交互。
 
-- **MCP 代理支持** — 新增 `mcp-proxy` 功能，允许通过 HiClaw 网关代理现有 MCP 服务器，使 Worker 无需直接网络暴露即可访问外部 MCP 工具。
+- **Worker 模板市场** — 新增基于模板的 Worker 创建流程。Manager 通过 `hiclaw-find-worker` 技能搜索 Nacos 模板注册中心（默认：`market.hiclaw.io`），根据需求推荐匹配模板，经管理员确认后一键导入。支持包简写语法、URL 编码路径，market 和 registry 场景使用一致的导入方式。通过 YAML 中的 `package` 引用即可从模板引导 Worker：`hiclaw apply -f my-worker.yaml`。
 
-- **OpenClaw CMS 插件集成** — Manager 现在集成 `openclaw-cms-plugin` 的安装和运行时接入，扩展 Agent 的内容管理能力。
+- **MCP 直接代理** — 在 v1.0.6 的 API→MCP 转换能力基础上，新增 MCP 直接代理支持。v1.0.6 将 HTTP API 转换为 MCP 工具（API→MCP），而 MCP 直接代理则允许代理已有的 MCP 服务器（如 Sentry、Notion、Asana 的 MCP 服务），自动处理认证方案和 SSE/StreamableHTTP 传输协议。Worker 通过相同的凭证零信任安全模型访问代理后的 MCP 工具 — 真实 Token 永远不会离开网关。
 
-- **Docker 网络别名** — 用 Docker 网络别名替代 ExtraHosts IP 注入，简化容器网络配置，提升重启后的可靠性。
+- **Team Leader Agent 与 DAG 编排** — 引入专门的 Team Leader Agent 协调 Team 内的 Worker。Team Leader 管理层级化任务委派、基于项目的工作组织，以及 **DAG（有向无环图）执行** — 复杂的多步骤任务被分解为依赖图并在可能时并行执行。每个 Team 拥有隔离的存储和独立的通信通道，实现多团队隔离。
 
-- **hiclawMode 网关配置** — Higress 网关初始化配置从 `mergeConsecutiveMessages` 切换为 `hiclawMode`，提供统一的 HiClaw 专属配置模式。
+- **Worker 服务发布 (Expose)** — Worker 现在可通过 Worker/Team CRD 的 `expose` 字段将 HTTP 服务通过 Higress 网关对外暴露。Controller 自动生成域名（如 `worker-alice-8080-local.hiclaw.io`）并配置网关路由，无需手动网络配置即可将 Worker 托管的 Web 应用和 API 对外发布。
 
-- **MiniMax M2.7 默认模型** — 将 MiniMax 默认模型升级至 M2.7，提升性能。
+- **Manager CoPaw 运行时** — Manager 容器现在支持 CoPaw（Python）运行时作为 Node.js OpenClaw 运行时的替代方案。
 
-- **交互式版本选择** — 安装脚本现在支持在安装过程中选择特定版本。
+- **默认 Embedding 模型** — 为 Manager 和 Worker 新增默认 embedding 模型（`text-embedding-v4`）支持，包含 OpenClaw→CoPaw 跨运行时桥接。
 
-- **安装后验证** — 新增验证脚本，安装完成后自动确认所有组件健康。
+- **统一技能注册中心** — 重构 Worker `find-skills` 发现链路，引入统一的 `hiclaw-find-skill` wrapper，支持 skills.sh（HTTPS）和 Nacos 双后端，默认使用 Nacos（`nacos://market.hiclaw.io/public`）。在 Worker 镜像中安装 `@nacos-group/cli` 支持直接 Nacos 工作流。
 
-- **多阶段协作协议** — 在 task-lifecycle 中新增多阶段协作协议，改进 Manager 与 Worker 在复杂任务上的协调。
+- **OpenClaw CMS 插件集成** — Manager 现在集成 `openclaw-cms-plugin` 的安装和运行时接入。
 
-- **模板化 Worker 导入** — 新增 Manager 内建技能 `hiclaw-find-worker`，将 Worker 创建统一为模板/包导入流程，避免回退到手工创建。
+- **Docker 网络别名** — 用 Docker 网络别名替代 ExtraHosts IP 注入，简化容器网络配置。
 
-- **模板包简写支持** — 增加模板包简写语法，支持可选版本和默认值，简化导入输入。
+- **hiclawMode 网关配置** — Higress 网关从 `mergeConsecutiveMessages` 切换为 `hiclawMode` 统一配置。
 
-- **模板导入路径泛化** — 扩展 `hiclaw-find-worker` 的导入入口，使 market / registry 场景使用一致的导入方式。
+- **MiniMax M2.7 默认模型** — MiniMax 默认模型升级至 M2.7。
 
-- **优化 market Worker 导入流程** — 完善市场 Worker 导入链路，使模板包路径和导入闭环处理更加稳定。
+- **交互式版本选择** — 安装脚本支持选择特定版本。
+
+- **安装后验证** — 新增验证脚本确认所有组件健康。
+
+- **多阶段协作协议** — 在 task-lifecycle 中新增多阶段协作协议。
 
 **Bug 修复**
 
-- 修复 embedded 模式删除后本地声明式配置残留问题 — `start-mc-mirror.sh` 现在对 `hiclaw-config/` 使用 `--remove`，删除资源时会同步移除本地被监听的 YAML，避免 `/root/hiclaw-fs/hiclaw-config/` 下残留 stale 文件。
-
-- 修复 `hiclaw apply` 静默忽略所有资源 — `loadResources()` 先调用 `strings.TrimSpace(line)` 再检查 `strings.HasPrefix(line, "  name:")`，去除空格后永远无法匹配。修复为对已 trim 的行检查 `strings.HasPrefix(line, "name:")`。
-
-- 修复包解析失败后资源卡在 `Phase="Pending"` — `r.Status().Update()` 可能因资源版本冲突静默失败，导致 Worker 永久卡住。修复方式：在错误路径状态更新前通过 `r.Get()` 刷新对象，并将带有非空错误 `Message` 的 `Phase="Pending"` 视为可重试。
-
-- 修复网关并发路由授权 — 添加乐观锁重试，防止多个 Worker 同时注册路由时的竞态条件。
-
-- 修复云端 Worker OSS 访问安全 — 云模式下所有 Worker 共享同一 RRSA 角色且 OSS 访问不受限。现在 `oss-credentials.sh` 注入内联 STS 策略，将令牌限制在 `agents/{worker}/*` 和 `shared/*` 前缀。
-
-- 修复 Docker 容器逃逸风险 — 新增 Docker API 代理（`hiclaw-docker-proxy`），限制容器对 Docker daemon 的访问。
-
-- 修复 `create-worker.sh` 健壮性 — 新增 Matrix 房间去重检查和失败通知，防止房间创建冲突时静默失败。
-
-- 修复 `state.json` 注册 — 强制所有任务类型注册，新增空闲停止安全检查，防止任务活跃时 Worker 被停止。
-
-- 修复 Element Web CSP 违规 — 使用外部 JS 文件替代内联脚本以符合内容安全策略。
-
-- 修复 Worker OSS 路径 — 为云端部署在 openclaw worker AGENTS.md 中添加可写 OSS 路径。
-
-- 修复所有 `mc` 调用的 STS 凭证自动刷新 — 用 `mc-wrapper.sh` 包装 mc 二进制文件，每次调用前执行 `ensure_mc_credentials`，防止云模式下约 50 分钟后令牌过期。
-
-- 修复 CoPaw Python 同步循环中的 STS 凭证刷新，防止令牌过期后 MinIO 同步失败。
-
-- 修复云端运行时检测 — 在 Dockerfile.aliyun 中显式设置 `HICLAW_RUNTIME=aliyun`；hiclaw-env.sh 中尊重预设的 `HICLAW_RUNTIME` 而非始终自动检测。
-
-- 修复云端部署中欢迎消息的可靠投递和运行时检测。
-
-- 为 Worker 新增双后端 `find-skills` 支持 —— 引入 `hiclaw-find-skill` 统一封装，默认使用 Nacos 发现技能，并可通过 `HICLAW_FIND_SKILL_BACKEND` 切回 `skills_sh`；同时为 OpenClaw 和 CoPaw Worker 安装运行时 wrapper。
-
-- 修复 Worker 导入：从 zip 部署 cron job 到 Worker；未安装 HiClaw 时添加安装命令提示；更新 migrate skill 导入命令的 CLI 用法。
-
-- 修复 PowerShell 脚本重装 bug；重装时清理 docker-proxy 容器和 hiclaw-net 网络。
-
-- 修复 Worker 容器未加入 hiclaw-net 网络导致服务连接失败。
-
-- 修复安装体验：升级提示中显示友好标签替代环境变量名。
-
-- 修复未使用的 openclaw hooks 配置导致启动失败 — 移除该配置。
-
-- 修复 Manager 初始化脚本中的 shell 脚本安全问题。
-
-- 修复发送欢迎消息前显式加入 Matrix 房间并重试，防止竞态条件。
-
-- 修复 Worker 模板包导入时路径未做 URL 编码导致的失败。
-
-- 调整 Worker 模板导入默认 Nacos 配置：`HICLAW_NACOS_REGISTRY_URI` 改为 `nacos://market.hiclaw.io:80/public`，主机默认值同步改为 `market.hiclaw.io`，并补充控制器预检以校验 `apply` 时的 Worker 名称与 AgentSpec 在线状态（保留独立默认端口回退值不变）。
-
-- 修复匿名预检场景：匿名预检改为基于 agentspec 列表进行检查。
-
-- 支持 `HICLAW_NACOS_USERNAME` 和 `HICLAW_NACOS_PASSWORD` 作为默认 Nacos 凭证（当 `nacos://` URI 省略 `user:pass@` 时）；从 URI 提取 Nacos 地址并添加预检验证。
-
-- 在 Worker 镜像中安装 `@nacos-group/cli`，让 OpenClaw 和 CoPaw Worker 都能直接使用 `nacos-cli` 执行基于 Nacos 的 skill 与 agentspec 工作流。
-
-- 重构 Worker `find-skills` 发现链路 —— 为 OpenClaw 和 CoPaw Worker 引入统一的 `hiclaw-find-skill` wrapper，按 `HICLAW_SKILLS_API_URL` 推断后端（`https://...` 走 skills.sh，`nacos://host[:port][/namespace]` 走 Nacos，默认端口 `8848`），在命令输出中明确展示实际 registry 来源，在安装与创建 Worker 时透传 registry / Nacos 鉴权配置，并优化 Nacos 检索召回与排序，补充 `react performance` / `pr review` 回归测试。
-
-- 简化 Worker 侧 `find-skills` 使用说明 —— 将 registry / backend 细节保留在运行时内部，不再在 Worker 技能文档中暴露这些实现信息。
-
-- 将安装流程与 Manager 创建 Worker 时的 `HICLAW_SKILLS_API_URL` 默认值改为 `nacos://market.hiclaw.io/public`。
-
-- 新增基于 Nacos AgentSpec 的 Worker 模板搜索与导入流程，让 Manager 可以先推荐匹配模板、经管理员确认后再安装。
-
-- 修复 `hiclaw-find-worker` 自动读取 `~/.nacos-cli/default.conf` 导致默认 registry 被本地 profile 覆盖；现在只使用显式 `HICLAW_NACOS_REGISTRY_URI` 或内建默认配置。
+- 修复 embedded 模式删除后本地声明式配置残留问题。
+- 修复 `hiclaw apply` 静默忽略所有资源的解析 bug。
+- 修复包解析失败后资源卡在 `Phase="Pending"` 状态。
+- 修复网关并发路由授权竞态条件。
+- 修复云端 Worker OSS 访问安全 — STS 内联策略限制令牌权限范围。
+- 修复 Docker 容器逃逸风险 — 新增 `hiclaw-docker-proxy`。
+- 修复 `create-worker.sh` 健壮性 — Matrix 房间去重和失败通知。
+- 修复 `state.json` 注册 — 强制所有任务类型注册，空闲停止安全检查。
+- 修复 Element Web CSP 违规 — 外部 JS 文件替代内联脚本。
+- 修复 `mc` 调用 STS 凭证自动刷新。
+- 修复 CoPaw Python 同步循环 STS 凭证刷新。
+- 修复云端运行时检测 — 显式设置 `HICLAW_RUNTIME=aliyun`。
+- 修复云端部署欢迎消息可靠投递。
+- 修复 Worker 导入：cron job 部署、安装提示、CLI 用法。
+- 修复 PowerShell 重装 bug；重装时清理 docker-proxy 和 hiclaw-net。
+- 修复 Worker 容器未加入 hiclaw-net 网络。
+- 修复安装体验：友好标签替代环境变量名。
+- 修复未使用的 openclaw hooks 配置导致启动失败。
+- 修复 Manager 初始化脚本 shell 安全问题。
+- 修复 Matrix 房间加入重试防止竞态条件。
+- 修复 Worker 模板包路径 URL 编码。
+- 修复 `hiclaw-find-worker` 本地 Nacos profile 覆盖默认配置。
 
 ---
 
 - feat: add Team, Human, and declarative management (hiclaw-controller) ([fd3b413](https://github.com/alibaba/hiclaw/commit/fd3b413))
 - feat(controller): support inline identity/soul/agents fields for Worker config ([e21d489](https://github.com/alibaba/hiclaw/commit/e21d489))
 - feat(mcp): add mcp-proxy support for proxying existing MCP servers ([61300b7](https://github.com/alibaba/hiclaw/commit/61300b7))
+- feat(team-leader): add project management, DAG orchestration, and isolated team storage ([d6dc90e](https://github.com/alibaba/hiclaw/commit/d6dc90e))
+- feat(controller): add service publishing via Worker expose field ([09e09df](https://github.com/alibaba/hiclaw/commit/09e09df))
+- feat(manager): add CoPaw runtime support for Manager container ([077538d](https://github.com/alibaba/hiclaw/commit/077538d))
+- feat: add channelPolicy to Worker/Team CRs and enable team peer mentions ([5ab47b1](https://github.com/alibaba/hiclaw/commit/5ab47b1))
+- feat(manager): add default model from environment variable ([7f7e7c2](https://github.com/alibaba/hiclaw/commit/7f7e7c2))
+- feat(memory): add default embedding model support for Manager and Worker ([0042e55](https://github.com/alibaba/hiclaw/commit/0042e55))
+- feat(manager): add hiclaw-find-worker template import workflow ([bbef1a4](https://github.com/alibaba/hiclaw/commit/bbef1a4))
+- Unify skill registry config and fix Nacos-backed skill discovery ([cb03e61](https://github.com/alibaba/hiclaw/commit/cb03e61))
 - feat(manager): integrate openclaw-cms-plugin install and runtime wiring ([1b5a5d8](https://github.com/alibaba/hiclaw/commit/1b5a5d8))
 - feat(init): switch from mergeConsecutiveMessages to hiclawMode ([81eb6ca](https://github.com/alibaba/hiclaw/commit/81eb6ca))
 - feat: upgrade MiniMax default model to M2.7 ([f058051](https://github.com/alibaba/hiclaw/commit/f058051))
 - feat(install): add interactive version selection prompt ([5c11316](https://github.com/alibaba/hiclaw/commit/5c11316))
 - feat(install): add post-install verification script ([ce4bfe2](https://github.com/alibaba/hiclaw/commit/ce4bfe2))
 - fix(gateway): add optimistic locking retry for concurrent route authorization ([2565e8c](https://github.com/alibaba/hiclaw/commit/2565e8c))
-- fix(hiclaw): fix hiclaw apply silently ignoring all resources due to loadResources() parsing bug ([fd3b413](https://github.com/alibaba/hiclaw/commit/fd3b413))
-- fix(controller): handle stuck Phase="Pending" resources after failed package resolution ([fd3b413](https://github.com/alibaba/hiclaw/commit/fd3b413))
+- fix(controller): propagate package resolve errors in handleUpdate ([8256f3d](https://github.com/alibaba/hiclaw/commit/8256f3d))
+- fix(controller): deploy package to MinIO atomically during worker update ([d9b1416](https://github.com/alibaba/hiclaw/commit/d9b1416))
+- fix(worker): fix openclaw.json merge and prevent gateway exit killing container ([38b71d8](https://github.com/alibaba/hiclaw/commit/38b71d8))
+- fix(worker): merge openclaw.json on pull instead of blind overwrite ([f9bb742](https://github.com/alibaba/hiclaw/commit/f9bb742))
 - fix(security): restrict cloud worker OSS access with STS inline policy ([85e61e9](https://github.com/alibaba/hiclaw/commit/85e61e9))
 - fix(security): add Docker API proxy to prevent container escape ([e97e821](https://github.com/alibaba/hiclaw/commit/e97e821))
 - fix(worker): improve create-worker robustness with room dedup and failure notification ([8bfe39f](https://github.com/alibaba/hiclaw/commit/8bfe39f))
 - fix(manager): enforce state.json registration for all task types and add idle-stop safety ([fa223d2](https://github.com/alibaba/hiclaw/commit/fa223d2))
 - fix(element-web): use external JS file for browser bypass to comply with CSP ([d8fd9c4](https://github.com/alibaba/hiclaw/commit/d8fd9c4))
-- fix(worker): add writable OSS paths to openclaw worker AGENTS.md ([4527240](https://github.com/alibaba/hiclaw/commit/4527240))
 - fix(cloud): wrap mc binary for automatic STS credential refresh ([9e2f2e5](https://github.com/alibaba/hiclaw/commit/9e2f2e5))
 - fix(copaw): refresh STS credentials in sync loops to prevent MinIO failure ([5a825e6](https://github.com/alibaba/hiclaw/commit/5a825e6))
 - fix(cloud): reliable runtime detection and welcome message delivery ([c6fe492](https://github.com/alibaba/hiclaw/commit/c6fe492))
@@ -224,9 +192,11 @@ Record image-affecting changes to `manager/`, `worker/`, `openclaw-base/` here b
 - fix: add explicit Matrix room join with retry before sending welcome message ([0569d1a](https://github.com/alibaba/hiclaw/commit/0569d1a))
 - fix: add multi-phase collaboration protocol to task-lifecycle ([d9393fa](https://github.com/alibaba/hiclaw/commit/d9393fa))
 - fix(controller): support HICLAW_NACOS_USERNAME/PASSWORD as default Nacos credentials ([ccf242c](https://github.com/alibaba/hiclaw/commit/ccf242c))
-- feat(worker): install @nacos-group/cli in OpenClaw and CoPaw worker images ([unreleased](https://github.com/higress-group/hiclaw))
+- fix(manager): reply to admin before greeting worker in post-creation ([3aa697a](https://github.com/alibaba/hiclaw/commit/3aa697a))
+- fix(manager): prevent zombie process from welcome message background task ([496](https://github.com/alibaba/hiclaw/commit/9ecc2c5))
+- fix(test): preserve explicit openclaw runtime in generated YAML ([488](https://github.com/alibaba/hiclaw/commit/f28c881))
+- feat: delete worker containers on resource cleanup instead of just stopping ([486](https://github.com/alibaba/hiclaw/commit/f67f591))
 - refactor(network): replace ExtraHosts IP injection with Docker network aliases ([0eb635d](https://github.com/alibaba/hiclaw/commit/0eb635d))
 - refactor: unify DM room creation into manager agent startup ([0569d1a](https://github.com/alibaba/hiclaw/commit/0569d1a))
-- feat(memory): add default embedding model (text-embedding-v4) support for Manager and Worker, with openclaw→copaw bridge
-- feat(manager): add CoPaw runtime support for Manager container ([f6c8f8d](https://github.com/maplefeng-a/hiclaw/commit/f6c8f8d))
-- feat(manager): support worker template import flow, including `hiclaw-find-worker`, generalized import paths, package shorthand, controller preflight fixes, URL-encoded package paths, and explicit registry defaults ([c010206](https://github.com/alibaba/hiclaw/commit/c010206))
+- feat: add integration guide for HiClaw with Alibaba Cloud CMS 2.0 ([527](https://github.com/alibaba/hiclaw/commit/0d1545a))
+- docs: add Japanese README ([375](https://github.com/alibaba/hiclaw/commit/04f6669))
